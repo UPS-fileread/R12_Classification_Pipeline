@@ -11,7 +11,7 @@ def pdf_to_text(pdf_bytes, num_pages=5):
         text = "\n\n".join(page.get_text() for page in pages_to_use)
     return text
 
-def extract_first_n_pages(pdf_bytes, n=5):
+def extract_first_n_pages(pdf_bytes, n=10):
     """
     Return a bytes object containing a new PDF with the first n pages.
     """
