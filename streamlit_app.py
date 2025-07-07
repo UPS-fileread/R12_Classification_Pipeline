@@ -134,7 +134,7 @@ def main():
                         f.write(uploaded_file.getbuffer())
 
                     # Create zip archive
-                    zip_filename = f"{base_name}_results.zip"
+                    zip_filename = f"{base_name}.zip"
                     zip_path = os.path.join(tmpdirname, zip_filename)
                     with zipfile.ZipFile(zip_path, "w") as zipf:
                         zipf.write(csv_path, arcname=csv_filename)
