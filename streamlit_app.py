@@ -1,12 +1,22 @@
 import streamlit as st
 import os
 import time
+import json
 import pandas as pd
 import io
 import zipfile
 import tempfile
 from scripts.classify_context import classify_context
 from scripts.convert_pdf import pdf_to_text, extract_first_n_pages
+
+import json
+# Load definitions for categories and subcategories
+script_dir = os.path.dirname(__file__)
+definitions_path = os.path.join(script_dir, "scripts", "definitions.json")
+with open(definitions_path, "r") as f:
+    definitions_data = json.load(f)
+categories_list = list(definitions_data["context_types"].keys())
+subcategories_data = definitions_data["subcategories"]
 
 
 def main():
@@ -69,15 +79,43 @@ def main():
             # Category
             col1, col2 = st.columns(2)
             with col1:
-                #st.markdown("**Category Sentiment:**")
-                selected_cat = st.feedback("thumbs", key=f"cat_{uploaded_file.name}")
-                if selected_cat is not None:
-                    st.markdown(f"You selected: {sentiment_mapping[selected_cat]} for Category")
+                cat_feedback = st.feedback("thumbs", key=f"cat_{uploaded_file.name}")
+                if cat_feedback is not None:
+                    if cat_feedback == 1:
+                        category_value = str(result.category)
+                    else:
+                        category_value = st.selectbox(
+                            "Please select the correct category",
+                            categories_list,
+                            key=f"cat_select_{uploaded_file.name}"
+                        )
+                    st.markdown(f"You selected: **{category_value}** for Category")
             with col2:
-                #st.markdown("**Subcategory Sentiment:**")
-                selected_subcat = st.feedback("thumbs", key=f"subcat_{uploaded_file.name}")
-                if selected_subcat is not None:
-                    st.markdown(f"You selected: {sentiment_mapping[selected_subcat]} for Subcategory")
+                # If category was disliked, auto-dislike subcategory and show correction dropdown
+                if 'cat_feedback' in locals() and cat_feedback == 0:
+                    subcat_feedback = 0
+                    current_cat = category_value if 'category_value' in locals() else str(result.category)
+                    options = subcategories_data.get(current_cat, [])
+                    subcategory_value = st.selectbox(
+                        "Please select the correct subcategory",
+                        options,
+                        key=f"subcat_select_{uploaded_file.name}"
+                    )
+                    st.markdown(f"You selected: **{subcategory_value}** for Subcategory")
+                else:
+                    subcat_feedback = st.feedback("thumbs", key=f"subcat_{uploaded_file.name}")
+                    if subcat_feedback is not None:
+                        if subcat_feedback == 1:
+                            subcategory_value = str(result.subcategory)
+                        else:
+                            current_cat = category_value if 'category_value' in locals() else str(result.category)
+                            options = subcategories_data.get(current_cat, [])
+                            subcategory_value = st.selectbox(
+                                "Please select the correct subcategory",
+                                options,
+                                key=f"subcat_select_{uploaded_file.name}"
+                            )
+                        st.markdown(f"You selected: **{subcategory_value}** for Subcategory")
 
             st.markdown("**Summary:**")
             st.info(result.summary)
@@ -102,18 +140,22 @@ def main():
 
             # --- Save results and sentiments to CSV on button click ---
             # Only enable download if all feedbacks are provided
-            if (selected_cat is not None and selected_subcat is not None and
-                selected_sum is not None and selected_themes is not None):
+            if (
+                ('cat_feedback' in locals() and cat_feedback is not None) and
+                ('subcat_feedback' in locals() and subcat_feedback is not None) and
+                selected_sum is not None and selected_themes is not None
+            ):
 
                 data = {
-                    "Category": [str(result.category)],
-                    "Category_Sentiment": [selected_cat],
-                    "SubCategory": [str(result.subcategory)],
-                    "SubCategory_Sentiment": [selected_subcat],
+                    "FileName": [uploaded_file.name],
+                    "PredictedCategory":      [str(result.category)],
+                    "CorrectedCategory":      [category_value],
+                    "PredictedSubCategory":   [str(result.subcategory)],
+                    "CorrectedSubCategory":   [subcategory_value],
                     "Summary": [result.summary],
-                    "Summary_Sentiment": [selected_sum],
+                    "SummarySentiment": selected_sum,
                     "KeyThemes": ["; ".join(result.key_themes)],
-                    "KeyThemes_Sentiment": [selected_themes]
+                    "KeyThemesSentiment": selected_themes,
                 }
                 df = pd.DataFrame(data)
                 csv_buffer = io.StringIO()
