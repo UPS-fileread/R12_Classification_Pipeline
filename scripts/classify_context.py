@@ -315,8 +315,6 @@ Ensure *category* and *subcategory* values exactly match one of the provided opt
         max_tokens=1024
     )
     content = chat_resp.choices[0].message.content
-    # NOTE: If "Trust Agreement" or other values are not recognized as valid subcategories,
-    # you must add them to definitions.json under "subcategories" → "Contract".
     try:
         parsed = TypeAdapter(ClassificationResult).validate_json(content)
     except Exception:
