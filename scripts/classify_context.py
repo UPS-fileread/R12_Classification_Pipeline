@@ -9,8 +9,10 @@ import os
 from enum import Enum
 from dotenv import load_dotenv
 import json
+import re
 from openai import OpenAI
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator, TypeAdapter
+from typing import Union, Literal
 
 # Load OpenAI API key from .env file
 load_dotenv()
@@ -26,6 +28,23 @@ CONTEXT_TYPES = cfg["context_types"]
 SUBCATEGORIES  = cfg["subcategories"]
 SUBCATEGORY_DEFINITIONS  = cfg["subcategory_definitions"]
 
+# Dynamically construct a subcategory Enum for each Category
+from enum import Enum as _Enum
+
+SubcategoryEnumMap: dict[str, _Enum] = {}
+for cat_name, subs in SUBCATEGORIES.items():
+    enum_name = f"{cat_name}Subcategory"
+    SubcategoryEnumMap[cat_name] = _Enum(enum_name, {s.replace(" ", ""): s for s in subs})
+
+# Expose each subcategory enum for discriminated-union models
+ContractSubcategory   = SubcategoryEnumMap["Contract"]
+LitigationSubcategory = SubcategoryEnumMap["Litigation"]
+RegulatorySubcategory = SubcategoryEnumMap["Regulatory"]
+FinancialSubcategory  = SubcategoryEnumMap["Financial"]
+StatutorySubcategory  = SubcategoryEnumMap["Statutory"]
+EmailSubcategory      = SubcategoryEnumMap["Email"]
+OtherSubcategory      = SubcategoryEnumMap["other"]
+
 # Model and categories
 LANGUAGE_MODEL = 'gpt-4.1-2025-04-14'
 
@@ -39,31 +58,185 @@ class Category(Enum):
     Email      = 'Email'
     other      = 'other'
 
-class ClassificationResult(BaseModel):
-    """
-    Pydantic model for classification results.
-    """
-    category: Category = Field(
-        ...,
-        description="One of the predefined legal-context categories",
-        example="Regulatory"
-    )
-    subcategory: str = Field(
-        ...,
-        description="One of the predefined subcategories for the chosen category. Use the provided subcategory definitions to ensure the best fit.",
-        example="Inspection Report"
-    )
-    summary: str = Field(
-        ...,
-        description="A brief summary of the document, written in 1-2 sentences. This should capture the main topic, parties, and purpose if possible."
-    )
-    key_themes: list[str] = Field(
-        ...,
-        description="A list of 3 concise bullet points highlighting the most important facts, events, obligations, or issues in the document. These should serve as an extended, detailed highlight of the document—covering key events, important parties, main legal or factual points, and anything a litigator would want to quickly grasp."
-    )
-    class Config:
-        use_enum_values = True
-        validate_assignment = True
+
+# Discriminated-union models for classification
+class ContractClassification(BaseModel):
+        category: Literal["Contract"] = Field(
+            ...,
+            title="Document category",
+            description="Must be 'Contract' for contract-related documents"
+        )
+        subcategory: ContractSubcategory = Field(
+            ...,
+            title="Contract subcategory",
+            description="Specific contract subcategory as defined in definitions.json"
+        )
+        summary: str = Field(
+            ...,
+            title="Summary",
+            description="4–6 sentence summary for litigators, neutral and factual"
+        )
+        key_themes: list[str] = Field(
+            ...,
+            title="Key Themes",
+            description="Exactly three key themes (5–15 words each)",
+            min_items=3,
+            max_items=3
+        )
+
+class LitigationClassification(BaseModel):
+        category: Literal["Litigation"] = Field(
+            ...,
+            title="Document category",
+            description="Must be 'Litigation' for litigation-related documents"
+        )
+        subcategory: LitigationSubcategory = Field(
+            ...,
+            title="Litigation subcategory",
+            description="Specific litigation subcategory as defined in definitions.json"
+        )
+        summary: str = Field(
+            ...,
+            title="Summary",
+            description="4–6 sentence summary for litigators, neutral and factual"
+        )
+        key_themes: list[str] = Field(
+            ...,
+            title="Key Themes",
+            description="Exactly three key themes (5–15 words each)",
+            min_items=3,
+            max_items=3
+        )
+
+class RegulatoryClassification(BaseModel):
+        category: Literal["Regulatory"] = Field(
+            ...,
+            title="Document category",
+            description="Must be 'Regulatory' for regulatory-related documents"
+        )
+        subcategory: RegulatorySubcategory = Field(
+            ...,
+            title="Regulatory subcategory",
+            description="Specific regulatory subcategory as defined in definitions.json"
+        )
+        summary: str = Field(
+            ...,
+            title="Summary",
+            description="4–6 sentence summary for litigators, neutral and factual"
+        )
+        key_themes: list[str] = Field(
+            ...,
+            title="Key Themes",
+            description="Exactly three key themes (5–15 words each)",
+            min_items=3,
+            max_items=3
+        )
+
+class FinancialClassification(BaseModel):
+        category: Literal["Financial"] = Field(
+            ...,
+            title="Document category",
+            description="Must be 'Financial' for financial-related documents"
+        )
+        subcategory: FinancialSubcategory = Field(
+            ...,
+            title="Financial subcategory",
+            description="Specific financial subcategory as defined in definitions.json"
+        )
+        summary: str = Field(
+            ...,
+            title="Summary",
+            description="4–6 sentence summary for litigators, neutral and factual"
+        )
+        key_themes: list[str] = Field(
+            ...,
+            title="Key Themes",
+            description="Exactly three key themes (5–15 words each)",
+            min_items=3,
+            max_items=3
+        )
+
+class StatutoryClassification(BaseModel):
+        category: Literal["Statutory"] = Field(
+            ...,
+            title="Document category",
+            description="Must be 'Statutory' for statutory or legislative documents"
+        )
+        subcategory: StatutorySubcategory = Field(
+            ...,
+            title="Statutory subcategory",
+            description="Specific statutory subcategory as defined in definitions.json"
+        )
+        summary: str = Field(
+            ...,
+            title="Summary",
+            description="4–6 sentence summary for litigators, neutral and factual"
+        )
+        key_themes: list[str] = Field(
+            ...,
+            title="Key Themes",
+            description="Exactly three key themes (5–15 words each)",
+            min_items=3,
+            max_items=3
+        )
+
+class EmailClassification(BaseModel):
+        category: Literal["Email"] = Field(
+            ...,
+            title="Document category",
+            description="Must be 'Email' for email communications"
+        )
+        subcategory: EmailSubcategory = Field(
+            ...,
+            title="Email subcategory",
+            description="Specific email subcategory as defined in definitions.json"
+        )
+        summary: str = Field(
+            ...,
+            title="Summary",
+            description="4–6 sentence summary for litigators, neutral and factual"
+        )
+        key_themes: list[str] = Field(
+            ...,
+            title="Key Themes",
+            description="Exactly three key themes (5–15 words each)",
+            min_items=3,
+            max_items=3
+        )
+
+class OtherClassification(BaseModel):
+        category: Literal["other"] = Field(
+            ...,
+            title="Document category",
+            description="Must be 'other' for documents not covered by other categories"
+        )
+        subcategory: OtherSubcategory = Field(
+            ...,
+            title="Other subcategory",
+            description="Specific other subcategory as defined in definitions.json"
+        )
+        summary: str = Field(
+            ...,
+            title="Summary",
+            description="4–6 sentence summary for litigators, neutral and factual"
+        )
+        key_themes: list[str] = Field(
+            ...,
+            title="Key Themes",
+            description="Exactly three key themes (5–15 words each)",
+            min_items=3,
+            max_items=3
+        )
+
+ClassificationResult = Union[
+    ContractClassification,
+    LitigationClassification,
+    RegulatoryClassification,
+    FinancialClassification,
+    StatutoryClassification,
+    EmailClassification,
+    OtherClassification,
+]
 
 def classify_context(text: str) -> ClassificationResult:
     """
@@ -110,6 +283,10 @@ You will receive the full text of a document (or an excerpt).  Your tasks, in st
 
 **Available Subcategories** (must match exactly):  
 {subcats_fmt}
+* Do NOT invent any new Category or Subcategory values.
+* If the document fits none of the provided subcategories, default to:
+    • category: "other"
+    • subcategory: "other"
 
 **Output format – return *only* this JSON object**  
 
@@ -129,16 +306,44 @@ Ensure *category* and *subcategory* values exactly match one of the provided opt
     ]
 
     # Make the API call to classify the text
-    resp = client.responses.parse(
+    # Call ChatCompletion and parse JSON response manually
+    chat_resp = client.chat.completions.create(
         model=LANGUAGE_MODEL,
-        input=messages,  # pass messages directly as before
-        text_format=ClassificationResult
+        messages=messages,
+        response_format={"type": "json_object"},  # ensure well‑formed JSON
+        temperature=0,
+        max_tokens=1024
     )
+    content = chat_resp.choices[0].message.content
+    # NOTE: If "Trust Agreement" or other values are not recognized as valid subcategories,
+    # you must add them to definitions.json under "subcategories" → "Contract".
+    try:
+        parsed = TypeAdapter(ClassificationResult).validate_json(content)
+    except Exception:
+        # Fallback for unrecognized subcategories: try to parse JSON, fixing minor formatting issues
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError:
+            # Attempt to insert missing commas between fields when keys run together
+            fixed = re.sub(r'"\s*\n\s*"', r'",\n    "', content)
+            data = json.loads(fixed)
 
-    # Will either return a valid ClassificationResult or raise ValidationError
-    if resp.output_parsed is None:
-        raise ValidationError("No valid response from LLM.")
-    return resp.output_parsed
+        # Fallback for any mismatch: unrecognized category or subcategory
+        cat_val = data.get("category")
+        sub_val = data.get("subcategory")
+        # If category is unknown, or subcategory is not valid under that category, route to other/other
+        valid_subs = {member.value for member in SubcategoryEnumMap.get(cat_val, [])}
+        if cat_val not in Category._value2member_map_ or sub_val not in valid_subs:
+            return OtherClassification(
+                category="other",
+                subcategory=OtherSubcategory.other,
+                summary=data.get("summary", ""),
+                key_themes=data.get("key_themes", [])
+            )
+
+        # Propagate other unexpected cases
+        raise RuntimeError(f"Failed to validate LLM response and no fallback available.\nResponse content: {content}")
+    return parsed
 
 def main():
     """
@@ -161,7 +366,7 @@ def main():
     try:
         result = classify_context(text)
         print(f"Category   : {result.category}")
-        print(f"Subcategory: {result.subcategory}")
+        print(f"Subcategory: {result.subcategory.value}")
         print(f"Summary    : {result.summary}")
         print("Key Themes :")
         for idx, theme in enumerate(result.key_themes, 1):

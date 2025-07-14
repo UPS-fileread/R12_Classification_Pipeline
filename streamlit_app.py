@@ -71,7 +71,7 @@ def main():
             # Display classification results
             col1, col2 = st.columns(2)
             col1.metric(label="Category", value=str(result.category))
-            col2.metric(label="Subcategory", value=str(result.subcategory))
+            col2.metric(label="Subcategory", value=result.subcategory.value)
 
             sentiment_mapping = [":material/thumb_down:", ":material/thumb_up:"]
 
@@ -150,7 +150,7 @@ def main():
                     "FileName": [uploaded_file.name],
                     "PredictedCategory":      [str(result.category)],
                     "CorrectedCategory":      [category_value],
-                    "PredictedSubCategory":   [str(result.subcategory)],
+                    "PredictedSubCategory":   [result.subcategory.value],
                     "CorrectedSubCategory":   [subcategory_value],
                     "Summary": [result.summary],
                     "SummarySentiment": selected_sum,
