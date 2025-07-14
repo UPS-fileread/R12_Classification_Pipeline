@@ -334,7 +334,7 @@ Ensure *category* and *subcategory* values exactly match one of the provided opt
         if cat_val not in Category._value2member_map_ or sub_val not in valid_subs:
             return OtherClassification(
                 category="other",
-                subcategory=OtherSubcategory.other,
+                subcategory=OtherSubcategory.Other,
                 summary=data.get("summary", ""),
                 key_themes=data.get("key_themes", [])
             )
