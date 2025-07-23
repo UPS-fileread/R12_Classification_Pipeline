@@ -7,12 +7,10 @@ import sys
 import warnings
 import os
 from enum import Enum
-from dotenv import load_dotenv
 import json
 from openai import OpenAI
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 from langfuse import get_client
-
 
 client = OpenAI()
 langfuse_client = get_client()
@@ -22,26 +20,38 @@ CONFIG_PATH = os.path.join(os.path.dirname(__file__), "definitions.json")
 with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
     cfg = json.load(f)
 
-CONTEXT_TYPES = cfg["context_types"]
-SUBCATEGORIES  = cfg["subcategories"]
-# Dynamically generate Subcategory enum from definitions.json
+# definitions_map is a dict mapping stringified IDs to names
+definitions_map: dict[int, str] = {
+    int(object_id): name
+    for object_id, name in cfg.items()
+}
+
+# Dynamically generate Category enum from definitions_map (top-level categories have IDs divisible by 10000000)
+Category = Enum(
+    "Category",
+    [(name.replace(" ", "_"), name) for id, name in definitions_map.items() if id % 100000000000000000000000 == 0]
+)
+
+# Build subcategories map: group definitions_map entries by category id
+subcategories_map: dict[str, list[str]] = {}
+for id, name in definitions_map.items():
+    # Skip top-level category IDs
+    if id % 100000000000000000000000 == 0:
+        continue
+    # Compute the parent category ID by stripping lower-order digits
+    cat_id = (id // 100000000000000000000000) * 100000000000000000000000
+    parent = definitions_map.get(cat_id)
+    if parent:
+        subcategories_map.setdefault(parent, []).append(name)
+
+# Dynamically generate Subcategory enum from subcategories_map
 Subcategory = Enum(
     "Subcategory",
-    [(sub.upper().replace(" ", "_"), sub) for subs in SUBCATEGORIES.values() for sub in subs]
+    [(sc.replace(" ", "_"), sc) for subs in subcategories_map.values() for sc in subs]
 )
 
 # Model and categories
 LANGUAGE_MODEL = 'gpt-4.1-2025-04-14'
-
-class Category(Enum):
-    """Legal context categories."""
-    Contract   = 'Contract'
-    Litigation = 'Litigation'
-    Regulatory = 'Regulatory'
-    Financial  = 'Financial'
-    Statutory  = 'Statutory'
-    Email      = 'Email'
-    other      = 'other'
 
 class ClassificationResult(BaseModel):
     """
@@ -65,6 +75,15 @@ class ClassificationResult(BaseModel):
         ...,
         description="A list of 3 concise bullet points highlighting the most important facts, events, obligations, or issues in the document. These should serve as an extended, detailed highlight of the document—covering key events, important parties, main legal or factual points, and anything a litigator would want to quickly grasp."
     )
+    @model_validator(mode="after")
+    def check_subcategory_matches_category(cls, model):
+        category_key = model.category.value if hasattr(model.category, "value") else model.category
+        allowed = subcategories_map.get(category_key, [])
+        if model.subcategory not in allowed:
+            raise ValueError(
+                f"Subcategory '{model.subcategory}' is not valid for category '{category_key}'"
+            )
+        return model
     class Config:
         use_enum_values = True
         validate_assignment = True
@@ -98,6 +117,21 @@ def classify_context(text: str) -> ClassificationResult:
     parsed = resp.choices[0].message.parsed
     if parsed is None:
         raise ValidationError("No valid response from LLM.")
+    # Validate category-subcategory alignment and retry if mismatch
+    category_key = parsed.category.value if hasattr(parsed.category, "value") else parsed.category
+    if parsed.subcategory not in subcategories_map.get(category_key, []):
+        # Retry once
+        resp = client.beta.chat.completions.parse(
+            model=LANGUAGE_MODEL,
+            messages=messages,
+            response_format=ClassificationResult
+        )
+        parsed = resp.choices[0].message.parsed
+        if parsed is None:
+            raise ValidationError("No valid response from LLM on retry.")
+        category_key = parsed.category.value if hasattr(parsed.category, "value") else parsed.category
+        if parsed.subcategory not in subcategories_map.get(category_key, []):
+            raise ValidationError("Subcategory does not match category after retry.")
     return parsed
 
 def main():
