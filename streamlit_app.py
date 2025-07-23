@@ -9,22 +9,32 @@ import tempfile
 from scripts.classify_context import classify_context
 from scripts.convert_pdf import pdf_to_text, extract_first_n_pages
 
-import json
-# Load definitions for categories and subcategories
+# --- Load definitions for categories and subcategories ---
 script_dir = os.path.dirname(__file__)
 definitions_path = os.path.join(script_dir, "scripts", "definitions.json")
 with open(definitions_path, "r") as f:
     definitions_data = json.load(f)
-categories_list = list(definitions_data["context_types"].keys())
-subcategories_data = definitions_data["subcategories"]
 
+CATEGORY_DIVISOR = 100000000000000000000000
+definitions_map = {int(k): v for k, v in definitions_data.items()}
+
+# Categories: IDs divisible by CATEGORY_DIVISOR
+categories_list = [v for k, v in definitions_map.items() if k % CATEGORY_DIVISOR == 0]
+
+# Subcategories: group by parent category name
+subcategories_data = {}
+for k, v in definitions_map.items():
+    if k % CATEGORY_DIVISOR == 0:
+        continue
+    parent_id = (k // CATEGORY_DIVISOR) * CATEGORY_DIVISOR
+    parent_name = definitions_map.get(parent_id)
+    if parent_name:
+        subcategories_data.setdefault(parent_name, []).append(v)
 
 def main():
-    # App title and instructions
     st.title('Fileread Document Classification')
     st.write('Upload one or more PDF files to classify their legal context and subcategory.')
 
-    # File uploader widget
     uploaded_files = st.file_uploader(
         "Choose PDF files", 
         type=["pdf", "txt"], 
@@ -65,18 +75,14 @@ def main():
                 text_content = st.session_state[file_key]["text"]
                 result = st.session_state[file_key]["result"]
 
-            # Preview extracted text
             st.text_area("Preview", text_content[:200], height=100, disabled=True)
 
-            # Display classification results
             col1, col2 = st.columns(2)
             col1.metric(label="Category", value=str(result.category))
-            col2.metric(label="Subcategory", value=result.subcategory.value)
+            col2.metric(label="Subcategory", value=getattr(result.subcategory, "value", str(result.subcategory)))
 
             sentiment_mapping = [":material/thumb_down:", ":material/thumb_up:"]
 
-            # --- Feedback and sentiment collection ---
-            # Category
             col1, col2 = st.columns(2)
             with col1:
                 cat_feedback = st.feedback("thumbs", key=f"cat_{uploaded_file.name}")
@@ -91,7 +97,6 @@ def main():
                         )
                     st.markdown(f"You selected: **{category_value}** for Category")
             with col2:
-                # If category was disliked, auto-dislike subcategory and show correction dropdown
                 if 'cat_feedback' in locals() and cat_feedback == 0:
                     subcat_feedback = 0
                     current_cat = category_value if 'category_value' in locals() else str(result.category)
@@ -106,7 +111,7 @@ def main():
                     subcat_feedback = st.feedback("thumbs", key=f"subcat_{uploaded_file.name}")
                     if subcat_feedback is not None:
                         if subcat_feedback == 1:
-                            subcategory_value = str(result.subcategory)
+                            subcategory_value = getattr(result.subcategory, "value", str(result.subcategory))
                         else:
                             current_cat = category_value if 'category_value' in locals() else str(result.category)
                             options = subcategories_data.get(current_cat, [])
@@ -119,7 +124,6 @@ def main():
 
             st.markdown("**Summary:**")
             st.info(result.summary)
-            #st.markdown("**Summary Sentiment:**")
             selected_sum = st.feedback("thumbs", key=f"sum_{uploaded_file.name}")
             if selected_sum is not None:
                 st.markdown(f"You selected: {sentiment_mapping[selected_sum]} for Summary")
@@ -127,7 +131,6 @@ def main():
             st.markdown("**Key Themes:**")
             for theme in result.key_themes:
                 st.markdown(f"- {theme}")
-            #st.markdown("**Key Themes Sentiment:**")
             selected_themes = st.feedback("thumbs", key=f"themes_{uploaded_file.name}")
             if selected_themes is not None:
                 st.markdown(f"You selected: {sentiment_mapping[selected_themes]} for Key Themes")
@@ -138,20 +141,21 @@ def main():
             end_time = time.time()
             st.info(f"Time taken to process: {end_time - start_time:.2f} seconds")
 
-            # --- Save results and sentiments to CSV on button click ---
-            # Only enable download if all feedbacks are provided
-            if (selected_cat is not None and selected_subcat is not None and
-                selected_sum is not None and selected_themes is not None):
-
+            if (
+                ('cat_feedback' in locals() and cat_feedback is not None) and
+                ('subcat_feedback' in locals() and subcat_feedback is not None) and
+                selected_sum is not None and selected_themes is not None
+            ):
                 data = {
-                    "Category": [str(result.category)],
-                    "Category_Sentiment": [selected_cat],
-                    "SubCategory": [str(result.subcategory)],
-                    "SubCategory_Sentiment": [selected_subcat],
+                    "FileName": [uploaded_file.name],
+                    "PredictedCategory":      [str(result.category)],
+                    "CorrectedCategory":      [category_value],
+                    "PredictedSubCategory":   [getattr(result.subcategory, "value", str(result.subcategory))],
+                    "CorrectedSubCategory":   [subcategory_value],
                     "Summary": [result.summary],
-                    "Summary_Sentiment": [selected_sum],
+                    "SummarySentiment": selected_sum,
                     "KeyThemes": ["; ".join(result.key_themes)],
-                    "KeyThemes_Sentiment": [selected_themes]
+                    "KeyThemesSentiment": selected_themes,
                 }
                 df = pd.DataFrame(data)
                 csv_buffer = io.StringIO()
@@ -160,12 +164,26 @@ def main():
                 base_name = os.path.splitext(uploaded_file.name)[0]
                 csv_filename = f"{base_name}.csv"
 
-                st.download_button(
-                    label="Download Results as CSV",
-                    data=csv_data,
-                    file_name=csv_filename,
-                    mime="text/csv"
-                )
+                with tempfile.TemporaryDirectory() as tmpdirname:
+                    csv_path = os.path.join(tmpdirname, csv_filename)
+                    with open(csv_path, "w") as f:
+                        f.write(csv_data)
+                    uploaded_path = os.path.join(tmpdirname, uploaded_file.name)
+                    with open(uploaded_path, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
+                    zip_filename = f"{base_name}.zip"
+                    zip_path = os.path.join(tmpdirname, zip_filename)
+                    with zipfile.ZipFile(zip_path, "w") as zipf:
+                        zipf.write(csv_path, arcname=csv_filename)
+                        zipf.write(uploaded_path, arcname=uploaded_file.name)
+                    with open(zip_path, "rb") as f:
+                        zip_bytes = f.read()
+                    st.download_button(
+                        label="Download Results",
+                        data=zip_bytes,
+                        file_name=zip_filename,
+                        mime="application/zip"
+                    )
     else:
         st.info('👆 Please upload at least one file to analyze.')
 
