@@ -140,22 +140,18 @@ def main():
 
             # --- Save results and sentiments to CSV on button click ---
             # Only enable download if all feedbacks are provided
-            if (
-                ('cat_feedback' in locals() and cat_feedback is not None) and
-                ('subcat_feedback' in locals() and subcat_feedback is not None) and
-                selected_sum is not None and selected_themes is not None
-            ):
+            if (selected_cat is not None and selected_subcat is not None and
+                selected_sum is not None and selected_themes is not None):
 
                 data = {
-                    "FileName": [uploaded_file.name],
-                    "PredictedCategory":      [str(result.category)],
-                    "CorrectedCategory":      [category_value],
-                    "PredictedSubCategory":   [result.subcategory.value],
-                    "CorrectedSubCategory":   [subcategory_value],
+                    "Category": [str(result.category)],
+                    "Category_Sentiment": [selected_cat],
+                    "SubCategory": [str(result.subcategory)],
+                    "SubCategory_Sentiment": [selected_subcat],
                     "Summary": [result.summary],
-                    "SummarySentiment": selected_sum,
+                    "Summary_Sentiment": [selected_sum],
                     "KeyThemes": ["; ".join(result.key_themes)],
-                    "KeyThemesSentiment": selected_themes,
+                    "KeyThemes_Sentiment": [selected_themes]
                 }
                 df = pd.DataFrame(data)
                 csv_buffer = io.StringIO()
@@ -164,34 +160,12 @@ def main():
                 base_name = os.path.splitext(uploaded_file.name)[0]
                 csv_filename = f"{base_name}.csv"
 
-                with tempfile.TemporaryDirectory() as tmpdirname:
-                    # Save CSV file
-                    csv_path = os.path.join(tmpdirname, csv_filename)
-                    with open(csv_path, "w") as f:
-                        f.write(csv_data)
-
-                    # Save uploaded document
-                    uploaded_path = os.path.join(tmpdirname, uploaded_file.name)
-                    with open(uploaded_path, "wb") as f:
-                        f.write(uploaded_file.getbuffer())
-
-                    # Create zip archive
-                    zip_filename = f"{base_name}.zip"
-                    zip_path = os.path.join(tmpdirname, zip_filename)
-                    with zipfile.ZipFile(zip_path, "w") as zipf:
-                        zipf.write(csv_path, arcname=csv_filename)
-                        zipf.write(uploaded_path, arcname=uploaded_file.name)
-
-                    # Read the zip for download
-                    with open(zip_path, "rb") as f:
-                        zip_bytes = f.read()
-
-                    st.download_button(
-                        label="Download Results",
-                        data=zip_bytes,
-                        file_name=zip_filename,
-                        mime="application/zip"
-                    )
+                st.download_button(
+                    label="Download Results as CSV",
+                    data=csv_data,
+                    file_name=csv_filename,
+                    mime="text/csv"
+                )
     else:
         st.info('👆 Please upload at least one file to analyze.')
 
