@@ -12,7 +12,8 @@ from openai import OpenAI
 from pydantic import BaseModel, Field, ValidationError, model_validator
 from langfuse import get_client
 
-client = OpenAI()
+api_key = os.environ.get("OPENAI_API_KEY")
+client = OpenAI(api_key=api_key)
 langfuse_client = get_client()
 
 # Load classification definitions from JSON config
@@ -115,11 +116,11 @@ def classify_context(text: str) -> ClassificationResult:
     )
 
     parsed = resp.choices[0].message.parsed
-    if parsed is None:
-        raise ValidationError("No valid response from LLM.")
-    # Validate category-subcategory alignment and retry if mismatch
-    category_key = parsed.category.value if hasattr(parsed.category, "value") else parsed.category
-    if parsed.subcategory not in subcategories_map.get(category_key, []):
+    category_key = str(parsed.category)
+    subcategory_value = str(parsed.subcategory)
+
+    # First validation
+    if subcategory_value not in subcategories_map.get(category_key, []):
         # Retry once
         resp = client.beta.chat.completions.parse(
             model=LANGUAGE_MODEL,
@@ -127,11 +128,15 @@ def classify_context(text: str) -> ClassificationResult:
             response_format=ClassificationResult
         )
         parsed = resp.choices[0].message.parsed
-        if parsed is None:
-            raise ValidationError("No valid response from LLM on retry.")
-        category_key = parsed.category.value if hasattr(parsed.category, "value") else parsed.category
-        if parsed.subcategory not in subcategories_map.get(category_key, []):
-            raise ValidationError("Subcategory does not match category after retry.")
+        category_key = str(parsed.category)
+        subcategory_value = str(parsed.subcategory)
+
+        # Second validation
+        if subcategory_value not in subcategories_map.get(category_key, []):
+            # Assign "other" for both category and subcategory
+            parsed.category = Category.other
+            parsed.subcategory = Subcategory.Other
+
     return parsed
 
 def main():
